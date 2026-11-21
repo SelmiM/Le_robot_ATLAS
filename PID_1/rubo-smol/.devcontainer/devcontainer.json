@@ -1,0 +1,167 @@
+// The container installs the ARM compiler and fetches the Pico SDK. Build,
+// flash and use the serial console from here on a supported Linux host.
+//
+// Format reference: https://aka.ms/devcontainer.json
+{
+	"name": "Pico Robot",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+
+	// Who VS Code runs as in here: postCreateCommand, the terminal, file saves.
+	// Every file created in the workspace is owned by this user on the host.
+	//
+	// Rootless Docker (e.g. shared lab machines): "root", the default. Only
+	// container UID 0 maps back to your host account; any other user, "vscode"
+	// included, lands in an unrelated subuid range that cannot write to the
+	// workspace.
+	//
+	// Normal (rootful) Docker: root works too, but the files it creates are
+	// owned by root on the host. To have them owned by you instead, set this in
+	// the environment VS Code is started from, then rebuild the container:
+	//
+	//     ROBOT_DEVCONTAINER_USER=vscode
+	//
+	// The devcontainers CLI then changes vscode's UID to match your host
+	// account. Do not set it on rootless Docker: the workspace becomes
+	// read-only.
+	"remoteUser": "${localEnv:ROBOT_DEVCONTAINER_USER:root}",
+
+	// Clones the pinned Pico SDK into .pico-sdk/ once, when the container is
+	// created, and fetches the client's packages. --no-build because a first
+	// build should be something you run and watch, not something that happens
+	// silently before you arrive. The test -w catches ROBOT_DEVCONTAINER_USER=vscode
+	// on rootless Docker, which otherwise fails deep inside git clone.
+	"postCreateCommand": "test -w . || { echo 'Cannot write to the workspace. On rootless Docker, unset ROBOT_DEVCONTAINER_USER (see devcontainer.json) and rebuild.'; exit 1; } && python3 tools/setup.py --no-build && npm --prefix client install --no-audit --no-fund",
+
+	"customizations": {
+		"vscode": {
+			// tools/build.py writes .vscode/c_cpp_properties.json for the C/C++
+			// extension, which is no use if the extension is not installed.
+			//
+			// cortex-debug is what runs .vscode/launch.json: it starts openocd,
+			// points gdb-multiarch at build/robot.elf, and gives you breakpoints
+			// in the editor. It pulls in the mcu-debug extensions itself.
+			//
+			// The official raspberry-pi.raspberry-pi-pico extension is deliberately
+			// absent. It activates on a pico_sdk_import.cmake in the workspace
+			// root, and this project has neither that file nor a root CMakeLists:
+			// the build lives in robot/ and is driven by tools/build.py. With no
+			// project detected, its whole Project menu greys out. It would also
+			// install a second copy of the SDK and openocd under ~/.pico-sdk,
+			// which is what tools/setup.py exists to avoid. Adding it back gains
+			// nothing that cortex-debug is not already doing.
+			//
+			// ms-vscode.cpptools-extension-pack is deliberately avoided too: it
+			// bundles ms-vscode.cmake-tools, which has nothing to build here (no
+			// root CMakeLists.txt, no CMake-driven build) but still prompts
+			// "Select a Kit" on open regardless. Installing cpptools directly
+			// gets the C/C++ extension without that prompt.
+			//
+			// Not installing the pack is not enough on its own, though: the
+			// devcontainers/cpp base image lists cmake-tools in its own image
+			// metadata, and VS Code merges that list with this one. The leading
+			// "-" on the last entry is the spec's way of removing an extension
+			// that the base image or a Feature added.
+			"extensions": [
+				"ms-vscode.cpptools",
+				"ms-python.python",
+				"mcu-debug.debug-tracker-vscode",
+				"marus25.cortex-debug",
+				"-ms-vscode.cmake-tools"
+			]
+		}
+	},
+
+	// client/fakerobot.js serves the phone page on 8080, so
+	// http://localhost:8080 works in the browser on your own machine while the
+	// fake robot runs in here. The real robot serves the same page itself.
+	"forwardPorts": [8080],
+	"portsAttributes": {
+		"8080": {
+			"label": "Phone page (fake robot)"
+		}
+	},
+
+	// Lets the container see the Pico and the Raspberry Pi Debug Probe. The
+	// /host-dev bind mount below exposes the USB devices themselves; the
+	// cgroup rules grant access to them (189 = USB, 166 = ttyACM). A bind
+	// mount rather than --device so that unplugging and replugging still
+	// works: the host's own /dev is what you are looking at, and it updates
+	// live. postStartCommand symlinks /dev/bus/usb, where picotool and
+	// openocd look, to /host-dev/bus/usb.
+	//
+	// /dev/bus/usb is not bind-mounted directly because it does not always
+	// exist on the host: under WSL2 it only appears once usbipd has attached
+	// a device, and a missing bind source stops the container from starting
+	// at all. The symlink just dangles until then, and works as soon as the
+	// device is attached -- no rebuild needed.
+	//
+	// The 166 rule is for the serial port. Its node is NOT bind-mounted at its
+	// usual name, because /dev/ttyACM0 does not exist on the host until the
+	// board is plugged in, and a bind mount's source has to exist when the
+	// container starts -- so there is nothing to point at in advance, and no
+	// way to add it later (mount --bind can only re-expose a path already
+	// visible somewhere in the container's own mount namespace).
+	//
+	// The fix is to bind-mount the host's whole /dev, live, at /host-dev, so
+	// whatever the host's udev creates or removes shows up immediately in
+	// here too. postStartCommand symlinks /dev/ttyACM0-3 to /host-dev, the
+	// same way as /dev/bus/usb: they dangle until a board is plugged in.
+	// Plain symlinks, not device nodes. The cgroup rule above is what makes
+	// opening the node for real actually work.
+	//
+	// On a rootful Docker host this container's root could just mknod the
+	// node itself instead, which is what this used to do. It stopped working
+	// on rootless Docker: there, container UID 0 is still a normal
+	// unprivileged user one level up, and creating a device node is refused
+	// there regardless of capabilities -- the kernel only allows it for a
+	// process in the initial user namespace. /host-dev sidesteps that
+	// entirely by never creating a device node inside the container at all.
+	//
+	// Bind-mounting all of /dev is broader than just the serial port -- on a
+	// shared host it hands this container every device node the invoking
+	// user's dockerd can see, not only the Pico's. Deliberate trade-off here
+	// given the alternative (a host-side udev rule) is not something every
+	// machine running this container can add.
+	//
+	// Being able to see the node and being allowed to open it are two
+	// different things, though. A udev rule making the Pico's raw USB device
+	// world-accessible (SUBSYSTEM=="usb", ATTR{idVendor}=="2e8a",
+	// MODE="0666") is not enough by itself -- that only covers
+	// /dev/bus/usb/*/*, which is why flashing works. CDC-ACM registers the
+	// serial port as a separate device under SUBSYSTEM=="tty", so without a
+	// rule of its own it falls back to Debian's stock default of
+	// root:dialout mode 660, which no amount of container-side cleverness
+	// gets past: a real dialout membership on the host does not carry into
+	// the container (supplementary groups added from in here resolve
+	// through the container's own subordinate id range, which has no path
+	// back to a real system gid), and no capability held in here reaches a
+	// device owned by an ancestor namespace either. It needs its own rule,
+	// matching the parent USB device's vendor id via ATTRS (plural -- walks
+	// up the device tree, since idVendor lives there, not on the tty
+	// device):
+	//
+	//     SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", MODE="0666"
+	//
+	// Without that, `console` still finds the node, but opening it fails --
+	// tools/pico.py checks for that before handing off to picocom, and says
+	// so.
+	//
+	// THIS NEEDS A LINUX HOST. Docker Desktop on macOS runs the container in a
+	// VM with no access to the Mac's USB, and on Windows the device has to be
+	// attached to WSL with usbipd-win first. Building and the tests work
+	// anywhere; flashing and the serial terminal do not.
+	"runArgs": [
+		"--device-cgroup-rule=c 189:* rmw",
+		"--device-cgroup-rule=c 166:* rmw"
+	],
+	"mounts": [
+		"source=/dev,target=/host-dev,type=bind"
+	],
+	// The container's /dev is a fresh tmpfs on every start, so this has to run
+	// on every start too, not just once at creation. /dev belongs to root, so
+	// as vscode this goes through sudo -n; as root it runs directly, for the
+	// same reason as the picotool and openocd wrappers in the Dockerfile.
+	"postStartCommand": "cmd='mkdir -p /dev/bus && ln -sfn /host-dev/bus/usb /dev/bus/usb && for n in 0 1 2 3; do ln -sfn /host-dev/ttyACM$n /dev/ttyACM$n; done'; if [ \"$(id -u)\" = 0 ]; then sh -c \"$cmd\"; else sudo -n sh -c \"$cmd\"; fi"
+}

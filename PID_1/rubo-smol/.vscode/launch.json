@@ -1,0 +1,58 @@
+{
+  // Debugging over the Raspberry Pi Debug Probe. Requires the probe's 3-pin
+  // SWD cable on the Pico's debug header, and the host's USB devices visible
+  // in the container (see .devcontainer/devcontainer.json).
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Pico Debug (Debug Probe)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/robot.elf",
+      "servertype": "openocd",
+      // Not plain openocd: the probe's USB node comes in from the host owned
+      // by root, so the server is started through a wrapper that raises
+      // privilege. Built in .devcontainer/Dockerfile.
+      "serverpath": "/usr/local/bin/openocd-sudo",
+      "device": "RP2040",
+      "gdbPath": "gdb-multiarch",
+      // cortex-debug reads the symbol table with objdump and nm, to sort the
+      // globals and statics into the Variables pane. It normally guesses their
+      // names from gdbPath, which here would give objdump-multiarch: a binary
+      // Debian stopped shipping. Naming it outright avoids the guess, and nm is
+      // then taken from the same path. Both come with gcc-arm-none-eabi.
+      "objdumpPath": "/usr/bin/arm-none-eabi-objdump",
+      "configFiles": [
+        "interface/cmsis-dap.cfg",
+        "target/rp2040.cfg"
+      ],
+      "openOCDLaunchCommands": [
+        "adapter speed 5000"
+      ],
+      "svdFile": "${workspaceFolder}/.pico-sdk/src/rp2040/hardware_regs/RP2040.svd",
+      "runToEntryPoint": "main",
+      // printf over the SWD wires rather than a serial port. Opens as an "RTT"
+      // terminal in VS Code when the session starts, so the output stays inside
+      // the container: no /dev/ttyACM, nothing to pass through from the host.
+      // Enabled on the firmware side by pico_enable_stdio_rtt in
+      // robot/CMakeLists.txt. "auto" finds the buffer by reading the _SEGGER_RTT
+      // symbol out of robot.elf.
+      //
+      // The terminal takes typing too, so a RADIO_SERIAL robot can be driven
+      // from here: {"left": 200, "right": 200}
+      "rttConfig": {
+        "enabled": true,
+        "address": "auto",
+        "decoders": [
+          {
+            "port": 0,
+            "type": "console",
+            "label": "RTT",
+            "noprompt": true
+          }
+        ]
+      }
+    }
+  ]
+}

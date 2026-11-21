@@ -1,0 +1,12 @@
+{
+	// devcontainer.json already installs ms-vscode.cpptools directly. VS Code's
+	// built-in per-language recommendations nag for cpptools-extension-pack
+	// anyway when a .cpp/.h file is opened -- that pack just bundles cpptools
+	// with cmake-tools, which this project deliberately avoids (see the
+	// comment in .devcontainer/devcontainer.json: no root CMakeLists.txt, no
+	// CMake-driven build, and cmake-tools prompts "Select a Kit" for no
+	// reason here). Listing it here as unwanted silences that nag.
+	"unwantedRecommendations": [
+		"ms-vscode.cpptools-extension-pack"
+	]
+}

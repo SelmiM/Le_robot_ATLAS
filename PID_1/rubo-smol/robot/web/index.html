@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Robot</title>
+<!--
+  This page and its scripts are embedded in firmware (EmbedWeb.cmake).
+  They have no external dependencies: the phone may have no internet access.
+-->
+<style>
+  :root {
+    --bg: #f6f6f4;  --panel: #fff;      --ink: #1a1a1a;
+    --muted: #6b6b6b; --line: #dcdcd8;  --accent: #2f6f4f;
+    --warn: #a33;   --warn-bg: #fbeceb;
+    --accent2: #a8620a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a; --panel: #202225; --ink: #e8e8e6;
+      --muted: #9a9a97; --line: #34363a; --accent: #6fbf95;
+      --warn: #e2726e; --warn-bg: #3a2322;
+      --accent2: #e0a050;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 12px 12px 96px; background: var(--bg); color: var(--ink);
+    font: 16px/1.45 system-ui, -apple-system, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  header { display: flex; align-items: center; gap: .6rem; margin: 0 0 12px; }
+  header h1 { font-size: 1.1rem; margin: 0; font-weight: 600; flex: 1; }
+  header span { font-size: .85rem; color: var(--muted); }
+  h2 { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--muted); margin: 0 0 .6rem; font-weight: 600; }
+  .wrap { max-width: 900px; margin: 0 auto; display: grid; gap: 12px;
+          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .panel { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 12px; padding: 14px; }
+  button {
+    font: inherit; padding: .75rem .6rem; border: 1px solid var(--line);
+    border-radius: 10px; background: var(--bg); color: var(--ink); cursor: pointer;
+  }
+  button:active, button.held { background: var(--line); }
+  button.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
+  /* The driving pad. touch-action and user-select stop a held finger from
+     scrolling the page or selecting text instead of driving. */
+  .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+         max-width: 300px; margin: 0 auto; }
+  .pad button { aspect-ratio: 1.3; font-size: 1.6rem; touch-action: none;
+                user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  .pad .blank { visibility: hidden; }
+
+  label { display: flex; align-items: center; gap: .7rem; margin-top: .8rem;
+          font-size: .9rem; color: var(--muted); }
+  label span { min-width: 4.5rem; }
+  input[type=range] { flex: 1; accent-color: var(--accent); }
+  label output { min-width: 4rem; text-align: right; font-variant-numeric: tabular-nums;
+                 color: var(--ink); }
+  input[type=number] { font: inherit; width: 4.5rem; padding: .6rem; border-radius: 10px;
+                       border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td { padding: .3rem 0; border-bottom: 1px solid var(--line); }
+  td:last-child { text-align: right; font-weight: 500; }
+  tr:last-child td { border-bottom: 0; }
+
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .list button { text-align: left; display: flex; justify-content: space-between; }
+  .list button small { color: var(--muted); }
+  .row { display: flex; gap: 8px; margin-top: 8px; }
+  .row button { flex: 1; }
+  .note { color: var(--muted); font-size: .85rem; margin: .7rem 0 0; }
+  .dot { width: .7rem; height: .7rem; border-radius: 50%; background: var(--warn); }
+  .dot.on { background: var(--accent); }
+  /* WEB-1, WEB-2 */
+  canvas { display: block; width: 100%; height: 140px; margin-top: .4rem;
+           background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+  .legend { font-size: .8rem; color: var(--muted); margin: .8rem 0 0; }
+  .legend b { font-weight: 600; }
+
+  /* WEB-4 */
+  #offline { display: none; margin: 0 0 12px; padding: .9rem; border-radius: 12px;
+             text-align: center; font-size: 1.2rem; font-weight: 700;
+             color: var(--warn); background: var(--warn-bg); border: 2px solid var(--warn); }
+  #offline.show { display: block; }
+  button:disabled { opacity: .35; }
+
+  pre { margin: 0; padding: .6rem; background: var(--bg); font-size: .78rem;
+        border: 1px solid var(--line); border-radius: 8px; height: 12rem;
+        overflow-y: auto; white-space: pre-wrap; color: var(--muted); }
+
+  /* STOP is always on screen, wherever the page is scrolled. */
+  #stop {
+    position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+    max-width: 876px; margin: 0 auto; padding: 1rem; font-size: 1.2rem; font-weight: 700;
+    letter-spacing: .08em; color: var(--warn); background: var(--warn-bg);
+    border: 2px solid var(--warn); border-radius: 14px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="dot" id="link"></div>
+  <h1 id="name">Robot</h1>
+  <span id="linkText">connexion…</span>
+</header>
+
+<div id="offline"></div>   <!-- WEB-4 -->
+
+<div class="wrap">
+
+  <div class="panel">
+    <h2>Conduite</h2>
+    <div class="pad">
+      <button class="blank"></button>
+      <button data-drive="1,1" aria-label="avancer">▲</button>
+      <button class="blank"></button>
+      <button data-drive="-1,1" aria-label="tourner à gauche">◀</button>
+      <button class="blank"></button>
+      <button data-drive="1,-1" aria-label="tourner à droite">▶</button>
+      <button class="blank"></button>
+      <button data-drive="-1,-1" aria-label="reculer">▼</button>
+      <button class="blank"></button>
+    </div>
+    <label><span>vitesse</span> <input type="range" id="speed" min="0" max="255" value="180">
+      <output id="speedOut"></output></label>
+    <label><span>impulsion</span> <input type="checkbox" id="pulse"></label>
+    <label><span>durée</span> <input type="range" id="duration" min="100" max="5000" step="100" value="1000">
+      <output id="durationOut"></output></label>
+    <p class="note">Maintenir pour rouler ; relâcher pour arrêter. En mode
+      impulsion, un appui lance un mouvement de la durée choisie.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Courbes, 10 dernières secondes</h2>
+    <p class="legend" style="margin-top:0"><b style="color:var(--accent)">distance avant</b></p>
+    <canvas id="distanceChart"></canvas>
+    <p class="legend"><b style="color:var(--accent)">requête</b> ·
+      <b style="color:var(--accent2)">commande → télémétrie</b></p>
+    <canvas id="delayChart"></canvas>
+  </div>
+
+  <div class="panel">
+    <h2>État</h2>
+    <table>
+      <tr><td>moteur gauche</td><td id="left">–</td></tr>
+      <tr><td>moteur droit</td><td id="right">–</td></tr>
+      <tr><td>distance avant</td><td id="front">–</td></tr>
+      <tr><td>distance côté</td><td id="side">–</td></tr>
+      <tr><td>mission sur le robot</td><td id="mission">–</td></tr>
+      <tr><td>temps de marche</td><td id="uptime">–</td></tr>
+      <tr><td>requête (moy. / max)</td><td id="request">–</td></tr>
+      <tr><td>commande → télémétrie</td><td id="loop">–</td></tr>
+    </table>
+    <p class="note">« requête » : un aller-retour HTTP, le réseau seul.
+      « commande → télémétrie » : du bouton jusqu'au moment où la page voit
+      que le robot a reçu la commande.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Missions sur le robot</h2>
+    <div class="list" id="robotMissions"></div>
+    <div class="row">
+      <input type="number" id="missionNumber" min="1" value="1" aria-label="numéro de mission">
+      <button id="missionStart">Lancer n°</button>
+      <button id="missionStop">Arrêter</button>
+    </div>
+    <p class="note">Écrites dans <code>Robot::mission()</code> : décisions prises
+      directement sur le robot.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Missions sur le téléphone</h2>
+    <div class="list" id="phoneMissions"></div>
+    <label><span>vitesse</span> <input type="range" id="mSpeed" min="0" max="255" value="180">
+      <output id="mSpeedOut"></output></label>
+    <label><span>durée</span> <input type="range" id="mDuration" min="100" max="5000" step="100" value="1000">
+      <output id="mDurationOut"></output></label>
+    <label><span>arrêt à</span> <input type="range" id="mDistance" min="50" max="1000" step="10" value="250">
+      <output id="mDistanceOut"></output></label>
+    <p class="note">Écrites dans <code>web/missions.js</code> : décisions prises
+      après réception de la télémétrie.</p>
+  </div>
+
+  <div class="panel" style="grid-column: 1 / -1">
+    <h2>Journal</h2>
+    <pre id="log"></pre>
+  </div>
+
+</div>
+
+<button id="stop">STOP</button>
+
+<script type="module">
+import { Robot } from './robot.js';
+import { missions } from './missions.js';
+
+const $ = (id) => document.getElementById(id);
+const bot = new Robot();
+
+function log(text) {
+  const pre = $('log');
+  const time = new Date().toTimeString().slice(0, 8);
+  pre.textContent += `${time}  ${text}\n`;
+  const lines = pre.textContent.split('\n');
+  if (lines.length > 301) pre.textContent = lines.slice(-300).join('\n');
+  pre.scrollTop = pre.scrollHeight;
+}
+
+let running = null;          // { name, abort: bool }
+
+function abortPhoneMission() {
+  if (running) running.abort = true;
+}
+
+// Stops everything: the wheels, the robot's mission, and a phone mission.
+
+$('stop').addEventListener('click', () => {
+  abortPhoneMission();
+  bot.stop();
+});
+
+// While a button is held, the same command is sent again every REPEAT_MS,
+// each one good for HOLD_MS. So if the phone stops sending -- the finger
+// slides off, the page freezes, the WiFi drops -- the robot stops within
+// HOLD_MS on its own. A dead man's switch.
+
+const HOLD_MS = 400;
+const REPEAT_MS = 150;
+
+for (const button of document.querySelectorAll('[data-drive]')) {
+  const [l, r] = button.dataset.drive.split(',').map(Number);
+  let timer = null;
+
+  const go = () => {
+    const speed = Number($('speed').value);
+    bot.drive(l * speed, r * speed, HOLD_MS);
+  };
+  const release = () => {
+    if (!timer) return;
+    clearInterval(timer);
+    timer = null;
+    button.classList.remove('held');
+    bot.stop();
+  };
+
+  button.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    abortPhoneMission();
+
+    // WEB-3: one movement per tap, of exactly the chosen duration, and no
+    // stop on release: the robot's own deadline ends it.
+    if ($('pulse').checked) {
+      const speed = Number($('speed').value);
+      bot.drive(l * speed, r * speed, Number($('duration').value));
+      return;
+    }
+
+    button.setPointerCapture(event.pointerId);
+    button.classList.add('held');
+    go();
+    clearInterval(timer);
+    timer = setInterval(go, REPEAT_MS);
+  });
+  button.addEventListener('pointerup', release);
+  button.addEventListener('pointercancel', release);
+  button.addEventListener('lostpointercapture', release);
+  button.addEventListener('contextmenu', (event) => event.preventDefault());
+}
+
+for (const [slider, suffix] of [['speed', ''], ['duration', ' ms'], ['mSpeed', ''],
+                                ['mDuration', ' ms'], ['mDistance', ' mm']]) {
+  const update = () => { $(slider + 'Out').textContent = $(slider).value + suffix; };
+  $(slider).addEventListener('input', update);
+  update();
+}
+
+$('missionStart').addEventListener('click', () => {
+  const number = Number($('missionNumber').value);
+  if (number > 0) bot.mission(number);
+});
+$('missionStop').addEventListener('click', () => bot.mission(0));
+
+function showRobotMissions(info) {
+  $('name').textContent = info.robot;
+  document.title = info.robot;
+
+  const list = $('robotMissions');
+  list.replaceChildren();
+  const names = info.missions ? info.missions.split(',') : [];
+  names.forEach((name, i) => {
+    const button = document.createElement('button');
+    button.dataset.mission = i + 1;
+    button.innerHTML = `<span></span><small>n°${i + 1}</small>`;
+    button.firstChild.textContent = name;
+    button.addEventListener('click', () => bot.mission(i + 1));
+    list.append(button);
+  });
+  if (!names.length) {
+    list.innerHTML = '<p class="note" style="margin:0">Aucune mission nommée dans '
+                   + '<code>MISSION_NAMES</code> (Robot.h). Un numéro marche quand même.</p>';
+  }
+}
+
+for (const name of Object.keys(missions)) {
+  const button = document.createElement('button');
+  button.innerHTML = `<span></span><small>${missions[name]().steps.length} étapes</small>`;
+  button.firstChild.textContent = name;
+  button.addEventListener('click', () => runPhoneMission(name, button));
+  $('phoneMissions').append(button);
+}
+
+async function runPhoneMission(name, button) {
+  if (running) { log(`« ${running.name} » tourne déjà`); return; }
+
+  const settings = {
+    speed: Number($('mSpeed').value),
+    duration: Number($('mDuration').value),
+    distance: Number($('mDistance').value),
+  };
+  const me = { name, abort: false };
+  running = me;
+  button.classList.add('on');
+
+  try {
+    const result = await missions[name](settings).run(bot, {
+      log,
+      aborted: () => me.abort,
+    });
+    if (!result.completed) log(`  « ${name} » arrêtée : ${result.reason}`);
+  } catch (error) {
+    log(`« ${name} » a planté : ${error.message}`);
+  } finally {
+    running = null;
+    button.classList.remove('on');
+  }
+}
+
+function distance(mm, ok) {
+  if (mm === undefined || mm === null) return '–';
+  if (!ok || mm < 0) return 'pas de mesure';
+  return mm + ' mm';
+}
+
+function ms(value) {
+  return value === null ? '–' : Math.round(value) + ' ms';
+}
+
+bot.on((message) => {
+  if (message.info) {
+    showRobotMissions(message);
+  } else if (message.error) {
+    log('erreur : ' + message.error);
+  } else if (message.restarted) {
+    log('le robot a redémarré');
+    restartedAt = performance.now();   // WEB-4
+    hello();
+  } else if (message.ms !== undefined) {
+    // WEB-1: a failed reading is a gap in the curve, not a drop to -1.
+    distances.push({ t: performance.now(), mm: message.front_ok ? message.front_mm : null });
+    $('left').textContent = message.left;
+    $('right').textContent = message.right;
+    $('front').textContent = distance(message.front_mm, message.front_ok);
+    $('side').textContent = distance(message.side_mm, message.side_ok);
+    $('mission').textContent = message.mission ? 'n°' + message.mission : 'aucune';
+    $('uptime').textContent = Math.round(message.ms / 1000) + ' s';
+    for (const button of $('robotMissions').querySelectorAll('button')) {
+      button.classList.toggle('on', Number(button.dataset.mission) === message.mission);
+    }
+  }
+});
+
+// WEB-1 and WEB-2: plot readings over WINDOW_MS.
+
+const WINDOW_MS = 10000;
+const distances = [];        // { t, mm }, mm null when the reading failed
+const delays = [];           // { t, request, loop }
+
+function forget(list) {
+  const oldest = performance.now() - WINDOW_MS;
+  while (list.length && list[0].t < oldest) list.shift();
+}
+
+// A round top for the scale, so the axis label stays readable: 1000, 1500...
+function scaleFor(list, keys, floor, step) {
+  let top = floor;
+  for (const point of list) for (const key of keys) if (point[key] > top) top = point[key];
+  return Math.ceil(top / step) * step;
+}
+
+function draw(canvas, list, series, top, unit) {
+  const ratio = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (canvas.width !== Math.round(w * ratio)) {
+    canvas.width = Math.round(w * ratio);
+    canvas.height = Math.round(h * ratio);
+  }
+  const g = canvas.getContext('2d');
+  g.setTransform(ratio, 0, 0, ratio, 0, 0);
+  g.clearRect(0, 0, w, h);
+
+  const css = getComputedStyle(document.documentElement);
+  const now = performance.now();
+  const x = (t) => w - ((now - t) / WINDOW_MS) * w;
+  const y = (v) => h - 4 - (Math.min(v, top) / top) * (h - 8);
+
+  g.fillStyle = css.getPropertyValue('--muted');
+  g.font = '11px system-ui, sans-serif';
+  g.fillText(`${top} ${unit}`, 6, 14);
+
+  for (const { key, color } of series) {
+    g.strokeStyle = css.getPropertyValue(color);
+    g.lineWidth = 2;
+    g.beginPath();
+    let penDown = false;
+    for (const point of list) {
+      const value = point[key];
+      if (value === null || value === undefined) { penDown = false; continue; }
+      if (penDown) g.lineTo(x(point.t), y(value));
+      else g.moveTo(x(point.t), y(value));
+      penDown = true;
+    }
+    g.stroke();
+  }
+}
+
+setInterval(() => {
+  const { request, loop } = bot.latency;
+  if (bot.connected) delays.push({ t: performance.now(), request: request.last, loop: loop.last });
+  forget(distances);
+  forget(delays);
+  draw($('distanceChart'), distances, [{ key: 'mm', color: '--accent' }],
+       scaleFor(distances, ['mm'], 1000, 500), 'mm');
+  draw($('delayChart'), delays, [{ key: 'request', color: '--accent' },
+                                 { key: 'loop', color: '--accent2' }],
+       scaleFor(delays, ['request', 'loop'], 200, 100), 'ms');
+}, 100);
+
+// WEB-4: handle a lost connection or restart.
+
+let restartedAt = -Infinity;
+
+// Link status and delays, a few times a second.
+setInterval(() => {
+  const up = bot.connected;
+  $('link').classList.toggle('on', up);
+  $('linkText').textContent = up ? 'connecté' : 'pas de réponse';
+
+  // Everything but STOP is useless without the robot, and a button that
+  // seems to work and does nothing is worse than one that is plainly off.
+  for (const button of document.querySelectorAll('button:not(#stop)')) button.disabled = !up;
+
+  const restarted = performance.now() - restartedAt < 3000;
+  $('offline').textContent = !up ? 'Robot injoignable' : restarted ? 'Le robot a redémarré' : '';
+  $('offline').classList.toggle('show', !up || restarted);
+
+  const { request, loop } = bot.latency;
+  $('request').textContent = request.mean === null ? '–'
+                           : `${ms(request.mean)} / ${ms(request.max)}`;
+  $('loop').textContent = loop.mean === null ? '–' : `${ms(loop.mean)} / ${ms(loop.max)}`;
+}, 250);
+
+/**
+ * Set telemetry to 100 ms and ask the robot who it is. A phone mission's stop
+ * condition cannot react faster than the readings it gets.
+ */
+function hello() {
+  bot.telemetry(100);
+  bot.send({ info: true });
+}
+
+// A page in the background is not being watched. Stop the robot, and stop
+// asking: the robot also stops on its own after WEB_TIMEOUT_MS of silence.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    abortPhoneMission();
+    bot.stop();
+    bot.pause();
+  } else {
+    bot.start();
+    hello();
+  }
+});
+
+bot.start();
+hello();
+</script>
+</body>
+</html>
