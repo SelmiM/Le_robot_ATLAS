@@ -1,5 +1,5 @@
 Projet Robotique – Programmation et contrôle d'un robot (ATLAS)
-Présentation
+Présentation:
 Ce projet universitaire consiste à découvrir et programmer un robot mobile à travers plusieurs travaux pratiques. Il permet de mettre en œuvre des algorithmes de commande, de développer des comportements autonomes et d'étudier les performances des différentes architectures de décision.
 L'objectif est de comprendre le fonctionnement du robot, de communiquer avec lui depuis un téléphone et d'améliorer progressivement ses capacités de déplacement et de navigation.
 Objectifs généraux
